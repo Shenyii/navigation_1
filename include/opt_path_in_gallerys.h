@@ -6,6 +6,8 @@
 #include <list>
 #include <cmath>
 
+#include <Eigen/Dense>
+
 #include "rclcpp/rclcpp.hpp"
 #include <chrono>
 #include <memory>
@@ -14,7 +16,10 @@
 #include "std_msgs/msg/float32_multi_array.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
+#include "osqp_solver.h"
+
 using namespace std;
+using namespace Eigen;
 using std::placeholders::_1;
 
 class Box {
@@ -47,6 +52,7 @@ private:
     double obstacle_threshold_;
     double map_resolution_;
     vector<Box> gallerys_;
+    Osqp_Solver osqp_solver;
 
     void worldToMap(double wx, double wy, int& mx, int& my);
     bool nodeObstacleCheck(double x, double y);
@@ -55,6 +61,7 @@ private:
     bool pathNodeInBox(double x, double y, Box box);
     bool pointInGallery(double x, double y, Box box, double bias);
     bool twoGallerysIntersect(Box box0, Box box1);
+    void generateQpProblam();
 
     nav_msgs::msg::Path ori_path_;
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr sub_path_;

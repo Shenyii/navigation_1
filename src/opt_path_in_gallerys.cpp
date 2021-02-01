@@ -339,6 +339,13 @@ bool GenerateGallery::twoGallerysIntersect(Box box0, Box box1) {
     return ans;
 }
 
+void GenerateGallery::generateQpProblam() {
+    double x0 = ori_path_.poses[0].pose.position.x;
+    double y0 = ori_path_.poses[0].pose.position.y;
+    double x1 = (ori_path_.poses.end() - 1)->pose.position.x;
+    double y1 = (ori_path_.poses.end() - 1)->pose.position.y;
+}
+
 void GenerateGallery::pubGallerys() {
     std_msgs::msg::Float32MultiArray gallerys;
     for(int i = 0; i < gallerys_.size() - 1; i++) {

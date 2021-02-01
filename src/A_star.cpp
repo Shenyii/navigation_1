@@ -7,7 +7,7 @@ AStar::AStar() : Node("a_star") {
     find_path_flag_ = 0;
     sub_ori_map_ = this ->create_subscription<nav_msgs::msg::OccupancyGrid>("map", 2, std::bind(&AStar::subOriMap, this, _1));
     sub_start_pose_ = this ->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>("initialpose", 2, std::bind(&AStar::subStartPose, this, _1));
-    sub_goal_pose_ = this ->create_subscription<geometry_msgs::msg::PoseStamped>("goal_pose", 2, std::bind(&AStar::subGoalPose, this, _1));
+    sub_goal_pose_ = this ->create_subscription<geometry_msgs::msg::PoseStamped>("move_base_simple/goal", 2, std::bind(&AStar::subGoalPose, this, _1));
     pub_path_ = this->create_publisher<nav_msgs::msg::Path>("own_path", 2);
     pub_points = this->create_publisher<sensor_msgs::msg::PointCloud>("point_cloud", 2);
 }

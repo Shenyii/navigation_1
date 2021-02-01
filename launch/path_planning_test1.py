@@ -14,18 +14,21 @@ def generate_launch_description():
           package='navigation_1',
           #node_namespace='turtlesim2',
           node_executable='generate_map',
+          #output='screen',
           #node_name='sim'
        ),
        Node(
           package='navigation_1',
           #node_namespace='turtlesim2',
           node_executable='a_star',
+          output='screen',
           #node_name='sim'
        ),
        Node(
           package='navigation_1',
           #node_namespace='turtlesim2',
           node_executable='opt_path_in_gallerys',
+          output='screen',
           #node_name='sim'
        ),
     ])

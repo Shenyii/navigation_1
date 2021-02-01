@@ -23,6 +23,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(osqp REQUIRED)
 
 include_directories(
   /usr/include/eigen3
@@ -48,7 +49,8 @@ ament_target_dependencies(a_star rclcpp std_msgs nav_msgs geometry_msgs sensor_m
 
 add_executable(opt_path_in_gallerys src/opt_path_in_gallerys.cpp)
 ament_target_dependencies(opt_path_in_gallerys rclcpp std_msgs nav_msgs geometry_msgs visualization_msgs)
- 
+target_link_libraries(opt_path_in_gallerys osqp::osqp)
+
 install(TARGETS
   generate_map
   a_star
