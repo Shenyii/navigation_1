@@ -15,6 +15,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include "std_msgs/msg/float32_multi_array.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
+#include "sensor_msgs/msg/point_cloud.hpp"
 
 #include "osqp_solver.h"
 
@@ -56,7 +57,7 @@ private:
 
     void worldToMap(double wx, double wy, int& mx, int& my);
     bool nodeObstacleCheck(double x, double y);
-    bool generateGallery();
+    bool generateGallery();    //走廊有重叠
     bool extendBox(double x0, double y0, double x1, double y1);
     bool pathNodeInBox(double x, double y, Box box);
     bool pointInGallery(double x, double y, Box box, double bias);
@@ -69,6 +70,7 @@ private:
     rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr sub_map_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_gallerys_;
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr pub_gallerys2_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr pub_points_;
 
     void subPath(const nav_msgs::msg::Path::SharedPtr path);
     void subMap(const nav_msgs::msg::OccupancyGrid::SharedPtr map);

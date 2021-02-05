@@ -5,6 +5,7 @@ GenerateGallery::GenerateGallery() : Node("opt_path_in_gallerys") {
     sub_map_ = this ->create_subscription<nav_msgs::msg::OccupancyGrid>("map", 2, std::bind(&GenerateGallery::subMap, this, _1));
     pub_gallerys_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("agvs", 2);
     pub_gallerys2_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("gallerys", 2);
+    pub_points_ = this->create_publisher<sensor_msgs::msg::PointCloud>("points", 2);
 }
 
 GenerateGallery::~GenerateGallery() {}
@@ -17,7 +18,9 @@ void GenerateGallery::worldToMap(double wx, double wy, int& mx, int& my) {
 void GenerateGallery::subPath(const nav_msgs::msg::Path::SharedPtr path) {
     ori_path_ = *path;
 
+    auto t1 = chrono::steady_clock::now();
     generateGallery();
+    cout << "cost time of opt path is: " << chrono::duration<double, micro>(chrono::steady_clock::now() - t1).count() << "us" << endl;
 }
 
 void GenerateGallery::subMap(const nav_msgs::msg::OccupancyGrid::SharedPtr map) {
@@ -42,7 +45,6 @@ bool GenerateGallery::nodeObstacleCheck(double x, double y) {
 }
 
 bool GenerateGallery::generateGallery() {
-    bool ans;
     if(ori_map_.data.size() < 7) {
         cout << "no map for opt." << endl;
     }
@@ -264,17 +266,22 @@ bool GenerateGallery::generateGallery() {
         }
     }
     gallerys_.push_back(box);
+    displayGallery();
+    for(int i = 0; i < gallerys_.size() - 1; i++) {
+        if(twoGallerysIntersect(gallerys_[i], gallerys_[i + 1]) == 0) {
+            cout << "generate error gallerys." << endl;
+
+            return false;
+        }
+    }
+
+    //auto t1 = chrono::steady_clock::now();
+    generateQpProblam();
+    //cout << "cost time of solve problam by OSQP is: " << chrono::duration<double, micro>(chrono::steady_clock::now() - t1).count() << "us" << endl;
 
     pubGallerys();
 
-    // /////////////////////test
-    // gallerys_.clear();
-    // gallerys_.push_back(Box(0, 1, 3, 6));
-    // /////////////////////
-
-    displayGallery();
-
-    return ans;
+    return true;
 }
 
 bool GenerateGallery::extendBox(double x0, double y0, double x1, double y1) {
@@ -344,16 +351,189 @@ void GenerateGallery::generateQpProblam() {
     double y0 = ori_path_.poses[0].pose.position.y;
     double x1 = (ori_path_.poses.end() - 1)->pose.position.x;
     double y1 = (ori_path_.poses.end() - 1)->pose.position.y;
+
+    vector<Box> intersection_areas;    //两个走廊相交的区域
+    for(int i = 0; i < int(gallerys_.size()) - 1; i++) {
+        Box box;
+        box.x_min_ = gallerys_[i].x_min_ > gallerys_[i + 1].x_min_ ? gallerys_[i].x_min_ : gallerys_[i + 1].x_min_;
+        box.x_max_ = gallerys_[i].x_max_ < gallerys_[i + 1].x_max_ ? gallerys_[i].x_max_ : gallerys_[i + 1].x_max_;
+        box.y_min_ = gallerys_[i].y_min_ > gallerys_[i + 1].y_min_ ? gallerys_[i].y_min_ : gallerys_[i + 1].y_min_;
+        box.y_max_ = gallerys_[i].y_max_ < gallerys_[i + 1].y_max_ ? gallerys_[i].y_max_ : gallerys_[i + 1].y_max_;
+        intersection_areas.push_back(box);
+
+        //cout << "test: " << box.x_min_ << ", " << box.x_max_ << ", " << box.y_min_ << ", " << box.y_max_ << endl;
+    }
+
+    Matrix<double, Dynamic, Dynamic> H;
+    Matrix<double, Dynamic, Dynamic> g;
+    Matrix<double, Dynamic, Dynamic> A;
+    Matrix<double, Dynamic, Dynamic> lb;
+    Matrix<double, Dynamic, Dynamic> ub;
+    vector<Matrix<double, Dynamic, Dynamic> > contraint_A;
+    vector<double> contraint_lb;
+    vector<double> contraint_ub;
+    Matrix<double, 10, 10> M1;
+    Matrix<double, 10, 10> M2;
+    M1 << 0., 0., 0., 0.,  0., 0., 0., 0., 0.,  0.,
+          0., 0., 0., 0.,  0., 0., 0., 0., 0.,  0.,
+          0., 0., 2., 0.,  0., 0., 0., 0., 0.,  0.,
+          0., 0., 0., 6.,  0., 0., 0., 0., 0.,  0.,
+          0., 0., 0., 0., 12., 0., 0., 0., 0.,  0.,
+          0., 0., 0., 0.,  0., 0., 0., 0., 0.,  0.,
+          0., 0., 0., 0.,  0., 0., 0., 0., 0.,  0.,
+          0., 0., 0., 0.,  0., 0., 0., 2., 0.,  0.,
+          0., 0., 0., 0.,  0., 0., 0., 0., 6.,  0.,
+          0., 0., 0., 0.,  0., 0., 0., 0., 0., 12.;
+    H.setZero(10 * gallerys_.size(), 10 * gallerys_.size());
+    g.setZero(10 * gallerys_.size(), 1);
+    vector<double> t;    //各段曲线的参数t
+    for(uint i = 0; i < gallerys_.size(); i++) {
+        double t0;    //距离除以速度等于时间，默认速度1m/s
+        if(gallerys_.size() > 1) {
+            if(i == 0) {
+                t0 = hypot(0.5 * intersection_areas[i].y_min_ + 0.5 * intersection_areas[i].y_max_ - y0, 0.5 * intersection_areas[i].x_min_ + 0.5 * intersection_areas[i].x_max_ - x0);
+            }
+            else if(i == gallerys_.size() - 1) {
+                t0 = hypot(0.5 * intersection_areas[i - 1].y_min_ + 0.5 * intersection_areas[i - 1].y_max_ - y1, 0.5 * intersection_areas[i - 1].x_min_ + 0.5 * intersection_areas[i - 1].x_max_ - x1);
+            }
+            else {
+                t0 = hypot(0.5 * (intersection_areas[i].y_min_ + intersection_areas[i].y_max_ - intersection_areas[i - 1].y_min_ - intersection_areas[i - 1].y_max_), 
+                           0.5 * (intersection_areas[i].x_min_ + intersection_areas[i].x_max_ - intersection_areas[i - 1].x_min_ - intersection_areas[i - 1].x_max_));
+            }
+        }
+        else {
+            t0 = hypot(y1 - y0, x1 - x0);
+        }
+        t.push_back(t0);
+    }
+    double max_t = *max_element(t.begin(), t.end());
+    for(uint i = 0; i < gallerys_.size(); i++) {    //放缩所有参数t，使最大值为2
+        t[i] *= 2 / max_t;
+    }
+    for(uint i = 0; i < gallerys_.size(); i++) {
+        M2 << 0., 0.,             0.,             0.,              0., 0., 0.,             0.,             0.,              0.,
+              0., 0.,             0.,             0.,              0., 0., 0.,             0.,             0.,              0.,
+              0., 0.,           t[i], pow(t[i], 2)/2,  pow(t[i], 3)/3, 0., 0.,             0.,             0.,              0.,
+              0., 0., pow(t[i], 2)/2, pow(t[i], 3)/3,  pow(t[i], 4)/4, 0., 0.,             0.,             0.,              0.,
+              0., 0., pow(t[i], 3)/3, pow(t[i], 4)/4,  pow(t[i], 5)/5, 0., 0.,             0.,             0.,              0.,
+              0., 0.,             0.,             0.,              0., 0., 0.,             0.,             0.,              0.,
+              0., 0.,             0.,             0.,              0., 0., 0.,             0.,             0.,              0.,
+              0., 0.,             0.,             0.,              0., 0., 0.,           t[i], pow(t[i], 2)/2,  pow(t[i], 3)/3,
+              0., 0.,             0.,             0.,              0., 0., 0., pow(t[i], 2)/2, pow(t[i], 3)/3,  pow(t[i], 4)/4,
+              0., 0.,             0.,             0.,              0., 0., 0., pow(t[i], 3)/3, pow(t[i], 4)/4,  pow(t[i], 5)/5;
+        H.block(10 * i, 10 * i, 10, 10) = M1 * M2 * M1;
+
+        Matrix<double, Dynamic, Dynamic> contraint_A0;
+        if(i == 0) {
+            contraint_A0.setZero(1, 10 * gallerys_.size());    //位置起点约束
+            contraint_A0.block(0, 10 * i, 1, 10) << 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(x0);
+            contraint_ub.push_back(x0);
+            contraint_A0.setZero(1, 10 * gallerys_.size());    //位置起点约束
+            contraint_A0.block(0, 10 * i, 1, 10) << 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(y0);
+            contraint_ub.push_back(y0);
+        }
+        else {
+            contraint_A0.setZero(1, 10 * gallerys_.size());    //起点位置约束
+            contraint_A0.block(0, 10 * i - 10, 1, 20) << 1., t[i-1], t[i-1]*t[i-1], t[i-1]*t[i-1]*t[i-1], t[i-1]*t[i-1]*t[i-1]*t[i-1], 0., 0., 0., 0., 0., -1., 0., 0., 0., 0., 0., 0., 0., 0., 0.;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(0);
+            contraint_ub.push_back(0);
+            contraint_A0.setZero(1, 10 * gallerys_.size());
+            contraint_A0.block(0, 10 * i - 10, 1, 20) << 0., 0., 0., 0., 0., 1., t[i-1], t[i-1]*t[i-1], t[i-1]*t[i-1]*t[i-1], t[i-1]*t[i-1]*t[i-1]*t[i-1], 0., 0., 0., 0., 0., -1., 0., 0., 0., 0.;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(0);
+            contraint_ub.push_back(0);
+
+            contraint_A0.setZero(1, 10 * gallerys_.size());    //起点速度约束
+            contraint_A0.block(0, 10 * i - 10, 1, 20) << 0., 1., 2*t[i-1], 3*t[i-1]*t[i-1], 4*t[i-1]*t[i-1]*t[i-1], 0., 0., 0., 0., 0., 0., -1., 0., 0., 0., 0., 0., 0., 0., 0.;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(0);
+            contraint_ub.push_back(0);
+            contraint_A0.setZero(1, 10 * gallerys_.size());
+            contraint_A0.block(0, 10 * i - 10, 1, 20) << 0., 0., 0., 0., 0., 0., 1., 2*t[i-1], 3*t[i-1]*t[i-1], 4*t[i-1]*t[i-1]*t[i-1], 0., 0., 0., 0., 0., 0., -1., 0., 0., 0.;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(0);
+            contraint_ub.push_back(0);
+        }
+        for(double t0 = 0.; t0 < t[i]; t0 += 0.2) {    //中间点位置约束
+            contraint_A0.setZero(1, 10 * gallerys_.size());
+            contraint_A0.block(0, 10 * i, 1, 10) << 1., t0, t0*t0, t0*t0*t0, t0*t0*t0*t0, 0., 0., 0., 0., 0.;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(gallerys_[i].x_min_);
+            contraint_ub.push_back(gallerys_[i].x_max_);
+            contraint_A0.setZero(1, 10 * gallerys_.size());
+            contraint_A0.block(0, 10 * i, 1, 10) << 0., 0., 0., 0., 0., 1., t0, t0*t0, t0*t0*t0, t0*t0*t0*t0;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(gallerys_[i].y_min_);
+            contraint_ub.push_back(gallerys_[i].y_max_);
+        }
+        if(i == gallerys_.size() - 1) {    //终点位置约束
+            contraint_A0.setZero(1, 10 * gallerys_.size());
+            contraint_A0.block(0, 10 * i, 1, 10) << 1., t[i], t[i]*t[i], t[i]*t[i]*t[i], t[i]*t[i]*t[i]*t[i], 0., 0., 0., 0., 0.;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(x1);
+            contraint_ub.push_back(x1);
+            contraint_A0.setZero(1, 10 * gallerys_.size());
+            contraint_A0.block(0, 10 * i, 1, 10) << 0., 0., 0., 0., 0., 1., t[i], t[i]*t[i], t[i]*t[i]*t[i], t[i]*t[i]*t[i]*t[i];
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(y1);
+            contraint_ub.push_back(y1);
+        }
+        else {    //终点位置约束
+            contraint_A0.setZero(1, 10 * gallerys_.size());
+            contraint_A0.block(0, 10 * i, 1, 10) << 1., t[i], t[i]*t[i], t[i]*t[i]*t[i], t[i]*t[i]*t[i]*t[i], 0., 0., 0., 0., 0.;
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(intersection_areas[i].x_min_);
+            contraint_ub.push_back(intersection_areas[i].x_max_);
+            contraint_A0.setZero(1, 10 * gallerys_.size());
+            contraint_A0.block(0, 10 * i, 1, 10) << 0., 0., 0., 0., 0., 1., t[i], t[i]*t[i], t[i]*t[i]*t[i], t[i]*t[i]*t[i]*t[i];
+            contraint_A.push_back(contraint_A0);
+            contraint_lb.push_back(intersection_areas[i].y_min_);
+            contraint_ub.push_back(intersection_areas[i].y_max_);
+        }
+    }
+    A.resize(contraint_A.size(), 10 * gallerys_.size());
+    lb.resize(contraint_A.size(), 1);
+    ub.resize(contraint_A.size(), 1);
+    for(uint i = 0; i < contraint_A.size(); i++) {
+        A.block(i, 0, 1, 10 * gallerys_.size()) = contraint_A[i];
+        lb(i, 0) = contraint_lb[i];
+        ub(i, 0) = contraint_ub[i];
+    }
+
+    Matrix<double, Dynamic, 1> solve;
+    bool solve_state = osqp_solver.solveQpProblam(H, g, A, lb, ub, solve);
+    //cout << solve << endl;
+
+    if(solve_state) {
+        sensor_msgs::msg::PointCloud points;
+        points.header.frame_id = "map";
+        for(uint i = 0; i < gallerys_.size(); i++) {
+            for(double t0 = 0; t0 < t[i]; t0 += 0.05) {
+                geometry_msgs::msg::Point32 point;
+                point.x = solve(10 * i + 0, 0) + solve(10 * i + 1, 0) * t0 + solve(10 * i + 2, 0) * t0*t0 + solve(10 * i + 3, 0) * t0*t0*t0 + solve(10 * i + 4, 0) * t0*t0*t0*t0;
+                point.y = solve(10 * i + 5, 0) + solve(10 * i + 6, 0) * t0 + solve(10 * i + 7, 0) * t0*t0 + solve(10 * i + 8, 0) * t0*t0*t0 + solve(10 * i + 9, 0) * t0*t0*t0*t0;
+                point.z = 0.05;
+                points.points.push_back(point);
+            }
+
+            // cout << "position: " << solve(10 * i + 0, 0) << ", " << solve(10 * i + 5, 0) << ", "
+            //                     << solve(10 * i + 0, 0) + solve(10 * i + 1, 0) * t[i] + solve(10 * i + 2, 0) * t[i]*t[i] + solve(10 * i + 3, 0) * t[i]*t[i]*t[i] + solve(10 * i + 4, 0) * t[i]*t[i]*t[i]*t[i] << ", "
+            //                     << solve(10 * i + 5, 0) + solve(10 * i + 6, 0) * t[i] + solve(10 * i + 7, 0) * t[i]*t[i] + solve(10 * i + 8, 0) * t[i]*t[i]*t[i] + solve(10 * i + 9, 0) * t[i]*t[i]*t[i]*t[i] << ", " 
+            //     << "velocity: " << solve(10 * i + 1, 0) << ", " << solve(10 * i + 6, 0) << ", "
+            //                     << solve(10 * i + 1, 0) + 2 * solve(10 * i + 2, 0) * t[i] + 3 * solve(10 * i + 3, 0) * t[i]*t[i] + 4 * solve(10 * i + 4, 0) * t[i]*t[i]*t[i] << ", "
+            //                     << solve(10 * i + 6, 0) + 2 * solve(10 * i + 7, 0) * t[i] + 3 * solve(10 * i + 8, 0) * t[i]*t[i] + 4 * solve(10 * i + 9, 0) * t[i]*t[i]*t[i] << endl;
+        }
+        pub_points_->publish(points);
+    }
 }
 
 void GenerateGallery::pubGallerys() {
     std_msgs::msg::Float32MultiArray gallerys;
-    for(int i = 0; i < gallerys_.size() - 1; i++) {
-        if(twoGallerysIntersect(gallerys_[i], gallerys_[i + 1]) == 0) {
-            cout << "generate error gallerys." << endl;
-            return;
-        }
-    }
     gallerys.layout.dim.resize(gallerys_.size());
     for(int i = 0; i < gallerys_.size(); i++) {
         gallerys.data.push_back(gallerys_[i].x_min_);

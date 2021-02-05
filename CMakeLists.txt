@@ -48,7 +48,7 @@ add_executable(a_star src/A_star.cpp)
 ament_target_dependencies(a_star rclcpp std_msgs nav_msgs geometry_msgs sensor_msgs)
 
 add_executable(opt_path_in_gallerys src/opt_path_in_gallerys.cpp)
-ament_target_dependencies(opt_path_in_gallerys rclcpp std_msgs nav_msgs geometry_msgs visualization_msgs)
+ament_target_dependencies(opt_path_in_gallerys rclcpp std_msgs nav_msgs geometry_msgs visualization_msgs sensor_msgs)
 target_link_libraries(opt_path_in_gallerys osqp::osqp)
 
 install(TARGETS
