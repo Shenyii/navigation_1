@@ -2,6 +2,7 @@
 #define OSQP_SOLVER_H
 
 #include <iostream>
+#include <Eigen/Dense>
 #include "osqp.h"
 
 using namespace std;
