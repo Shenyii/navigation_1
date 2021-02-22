@@ -73,6 +73,7 @@ private:
     nav_msgs::msg::OccupancyGrid ori_map_;
     rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_start_pose_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_goal_pose_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sub_goal_pose2_;
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr pub_points;
 

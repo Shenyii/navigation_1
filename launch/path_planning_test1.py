@@ -22,7 +22,9 @@ def generate_launch_description():
           #node_namespace='turtlesim2',
           node_executable='a_star',
           output='screen',
-          #node_name='sim'
+          #remappings=[
+          #   ('/initialpose', '/move_base_simple/goal'),
+          #]
        ),
        Node(
           package='navigation_1',
